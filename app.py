@@ -46,6 +46,30 @@ def course_details(code):
     return render_template('course_details.html', course=course)
 
 
+@app.route('/add_course', methods=['GET', 'POST'])
+def add_course():
+    if request.method == 'POST':
+        course_name = request.form.get('name')
+        instructor = request.form.get('instructor')
+        semester = request.form.get('semester')
+        course_code = request.form.get('code')
+
+        # Validation
+        if not all([course_name, instructor, semester, course_code]):
+            flash("All fields are required!", "error")
+            return redirect(url_for('add_course'))
+
+        # Save the new course
+        save_courses({
+            'name': course_name,
+            'instructor': instructor,
+            'semester': semester,
+            'code': course_code
+        })
+        flash(f"Course '{course_name}' added successfully!", "success")
+        return redirect(url_for('course_catalog'))
+    return render_template('add_course.html')
+
 
 if __name__ == '__main__':
     app.run(debug=True)
