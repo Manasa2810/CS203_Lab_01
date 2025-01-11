@@ -54,12 +54,12 @@ def add_course():
         semester = request.form.get('semester')
         course_code = request.form.get('code')
 
-        # Validation
+        
         if not all([course_name, instructor, semester, course_code]):
             flash("All fields are required!", "error")
             return redirect(url_for('add_course'))
 
-        # Save the new course
+        
         save_courses({
             'name': course_name,
             'instructor': instructor,
