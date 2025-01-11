@@ -55,9 +55,11 @@ def add_course():
         course_code = request.form.get('code')
 
         
-        if not all([course_name, instructor, semester, course_code]):
-            flash("All fields are required!", "error")
-            return redirect(url_for('add_course'))
+    if not course_name or not instructor :
+        logging.error('Failed to add course: Missing required fields.')
+        flash('Error: Course name and instructor are required.', 'error')
+        return redirect(url_for('add_course'))
+
 
         
         save_courses({
