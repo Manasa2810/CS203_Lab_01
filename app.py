@@ -1,11 +1,14 @@
 import json
 import os
+import logging
 from flask import Flask, render_template, request, redirect, url_for, flash
 
 # Flask App Initialization
 app = Flask(__name__)
 app.secret_key = 'secret'
 COURSE_FILE = 'course_catalog.json'
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 
 # Utility Functions
@@ -55,10 +58,10 @@ def add_course():
         course_code = request.form.get('code')
 
         
-    if not course_name or not instructor :
-        logging.error('Failed to add course: Missing required fields.')
-        flash('Error: Course name and instructor are required.', 'error')
-        return redirect(url_for('add_course'))
+        if not course_name or not instructor :
+            logging.error('Failed to add course: Missing required fields.')
+            flash('Error: Course name and instructor are required.', 'error')
+            return redirect(url_for('add_course'))
 
 
         
