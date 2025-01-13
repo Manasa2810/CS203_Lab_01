@@ -55,29 +55,41 @@ def course_details(code):
 @app.route('/add_course', methods=['GET', 'POST'])
 def add_course():
     if request.method == 'POST':
+        # Retrieve form data
         course_name = request.form.get('name')
         instructor = request.form.get('instructor')
         semester = request.form.get('semester')
         course_code = request.form.get('code')
 
-        
-        if not course_name or not instructor :
-            logging.error('Failed to add course: Missing required fields.')
-            flash('Error: Course name and instructor are required.', 'error')
+        # Check if any required field is missing
+        missing_fields = []
+        if not course_name:
+            missing_fields.append("Course Name")
+        if not instructor:
+            missing_fields.append("Instructor")
+        if not semester:
+            missing_fields.append("Semester")
+        if not course_code:
+            missing_fields.append("Course Code")
+
+        # If any field is missing, display an error message
+        if missing_fields:
+            logging.error(f"Failed to add course: Missing fields - {', '.join(missing_fields)}.")
+            flash(f"Error: The following fields are required: {', '.join(missing_fields)}.", "error")
             return redirect(url_for('add_course'))
 
-
-        
+        # Add the new course to the catalog
         save_courses({
             'name': course_name,
             'instructor': instructor,
             'semester': semester,
             'code': course_code
         })
+
         flash(f"Course '{course_name}' added successfully!", "success")
         return redirect(url_for('course_catalog'))
+    
     return render_template('add_course.html')
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
