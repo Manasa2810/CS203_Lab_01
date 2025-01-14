@@ -3,54 +3,34 @@ import os
 import logging
 from flask import Flask, render_template, request, redirect, url_for, flash
 from opentelemetry import trace
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+from opentelemetry.instrumentation.flask import FlaskInstrumentor
+from pythonjsonlogger import jsonlogger
+import time
 
 # Flask App Initialization
 app = Flask(__name__)
 app.secret_key = 'secret'
 COURSE_FILE = 'course_catalog.json'
 
-# Set up tracing
+# Configure Tracing
 trace.set_tracer_provider(TracerProvider())
-
-# Configure the Jaeger Exporter
 jaeger_exporter = JaegerExporter(
-    agent_host_name="localhost",  # Jaeger agent hostname
-    agent_port=6831,             # Jaeger agent port
+    agent_host_name='localhost',
+    agent_port=6831,
 )
-
-# Add the Jaeger exporter to the tracer provider
-trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(jaeger_exporter))
-tracer = trace.get_tracer(__name__)
-
-# Instrument Flask and Requests
+span_processor = BatchSpanProcessor(jaeger_exporter)
+trace.get_tracer_provider().add_span_processor(span_processor)
 FlaskInstrumentor().instrument_app(app)
-RequestsInstrumentor().instrument()
 
-# Set up logging for structured logging (JSON format)
-class JSONLogFormatter(logging.Formatter):
-    def format(self, record):
-        log_obj = {
-            "timestamp": self.formatTime(record, self.datefmt),
-            "level": record.levelname,
-            "message": record.getMessage(),
-            "request_id": getattr(record, 'request_id', None),  # Add custom fields if needed
-        }
-        return json.dumps(log_obj)
-
-# Remove existing handlers and configure JSON logging
-for handler in logging.root.handlers[:]:
-    logging.root.removeHandler(handler)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
-handler = logging.StreamHandler()
-formatter = JSONLogFormatter('%(asctime)s %(message)s')
-handler.setFormatter(formatter)
-logging.getLogger().addHandler(handler)
+# Configure Structured Logging
+log_handler = logging.StreamHandler()
+formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(message)s')
+log_handler.setFormatter(formatter)
+logging.root.addHandler(log_handler)
+logging.root.setLevel(logging.INFO)
 
 # Utility Functions
 def load_courses():
@@ -60,79 +40,86 @@ def load_courses():
     with open(COURSE_FILE, 'r') as file:
         return json.load(file)
 
+
 def save_courses(data):
     """Save new course data to the JSON file."""
     courses = load_courses()  # Load existing courses
-    logging.info(f"Existing courses: {courses}")  # Log current courses
-    logging.info(f"Adding new course: {data}")  # Log the course being added
-    courses.append(data)  # Append new course data
+    courses.append(data)  # Append the new course
     with open(COURSE_FILE, 'w') as file:
-        json.dump(courses, file, indent=4)  # Save the updated list back to the file
+        json.dump(courses, file, indent=4)
+
 
 # Routes
 @app.route('/')
 def index():
-    return render_template('index.html')
+    with trace.get_tracer(__name__).start_as_current_span("index_page"):
+        logging.info("Rendering index page")
+        return render_template('index.html')
+
 
 @app.route('/catalog')
 def course_catalog():
-    with tracer.start_as_current_span("Render Course Catalog") as span:
+    with trace.get_tracer(__name__).start_as_current_span("course_catalog"):
+        start_time = time.time()
         courses = load_courses()
-        span.set_attribute("courses.count", len(courses))
-        logging.info(f"Displaying {len(courses)} courses")
-        return render_template('course_catalog.html', courses=courses)
+        logging.info("Accessed course catalog", extra={"route": "/catalog", "requests": 1})
+        return render_template('course_catalog.html', courses=courses, processing_time=time.time() - start_time)
+
 
 @app.route('/course/<code>')
 def course_details(code):
-    with tracer.start_as_current_span("View Course Details") as span:
+    with trace.get_tracer(__name__).start_as_current_span("course_details"):
+        start_time = time.time()
         courses = load_courses()
         course = next((course for course in courses if course['code'] == code), None)
         if not course:
+            logging.error(f"No course found with code '{code}'", extra={"route": f"/course/{code}", "error": "not_found"})
             flash(f"No course found with code '{code}'.", "error")
-            span.set_attribute("error", True)
-            logging.error(f"Course with code '{code}' not found.")
             return redirect(url_for('course_catalog'))
+        logging.info(f"Course details accessed for {code}", extra={"route": f"/course/{code}", "requests": 1, "processing_time": time.time() - start_time})
         return render_template('course_details.html', course=course)
+
 
 @app.route('/add_course', methods=['GET', 'POST'])
 def add_course():
-    if request.method == 'POST':
-        # Retrieve form data
-        course_name = request.form.get('name')
-        instructor = request.form.get('instructor')
-        semester = request.form.get('semester')
-        course_code = request.form.get('code')
+    with trace.get_tracer(__name__).start_as_current_span("add_course"):
+        if request.method == 'POST':
+            # Retrieve form data
+            course_name = request.form.get('name')
+            instructor = request.form.get('instructor')
+            semester = request.form.get('semester')
+            course_code = request.form.get('code')
 
-        # Check if any required field is missing
-        missing_fields = []
-        if not course_name:
-            missing_fields.append("Course Name")
-        if not instructor:
-            missing_fields.append("Instructor")
-        if not semester:
-            missing_fields.append("Semester")
-        if not course_code:
-            missing_fields.append("Course Code")
+            # Check if any required field is missing
+            missing_fields = []
+            if not course_name:
+                missing_fields.append("Course Name")
+            if not instructor:
+                missing_fields.append("Instructor")
+            if not semester:
+                missing_fields.append("Semester")
+            if not course_code:
+                missing_fields.append("Course Code")
 
-        # If any field is missing, display an error message
-        if missing_fields:
-            logging.error(f"Failed to add course: Missing fields - {', '.join(missing_fields)}.")
-            flash(f"Error: The following fields are required: {', '.join(missing_fields)}.", "error")
-            return redirect(url_for('add_course'))
+            # If any field is missing, display an error message
+            if missing_fields:
+                logging.error(f"Failed to add course: Missing fields - {', '.join(missing_fields)}.", extra={"route": "/add_course", "error": "missing_fields"})
+                flash(f"Error: The following fields are required: {', '.join(missing_fields)}.", "error")
+                return redirect(url_for('add_course'))
 
-        # Add the new course to the catalog
-        save_courses({
-            'name': course_name,
-            'instructor': instructor,
-            'semester': semester,
-            'code': course_code
-        })
+            # Add the new course to the catalog
+            save_courses({
+                'name': course_name,
+                'instructor': instructor,
+                'semester': semester,
+                'code': course_code
+            })
 
-        flash(f"Course '{course_name}' added successfully!", "success")
-        logging.info(f"Course '{course_name}' added successfully.")
-        return redirect(url_for('course_catalog'))
-    
-    return render_template('add_course.html')
+            logging.info(f"Course '{course_name}' added successfully!", extra={"route": "/add_course", "requests": 1})
+            flash(f"Course '{course_name}' added successfully!", "success")
+            return redirect(url_for('course_catalog'))
+        
+        return render_template('add_course.html')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
